@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Matrix</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #e5e5e5;
+            font-family: 'Inter', sans-serif;
+        }
+        .glass {
+            background: rgba(42, 42, 42, 0.5);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .matrix-input { background: #444; color: #fff; border: 1px solid #666; }
+        .matrix-input:focus { border-color: #888; background: #555; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto p-6">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white mb-2">Decision Matrix</h1>
+            <p class="text-gray-400">Compare your options by rating them against important factors</p>
+        </div>
+
+        <!-- Tabs with Editable Names - Wider -->
+        <div class="tabs tabs-boxed justify-center mb-6 w-full max-w-6xl mx-auto glass">
+            <div id="matrixTabs" class="flex gap-2 w-full justify-center flex-wrap"></div>
+        </div>
+
+
+        <!-- Decision Matrix Table - Full Width -->
+        <div class="mb-6">
+            <div class="card bg-gray-800 shadow-xl">
+                <div class="card-body p-0">
+                    <div class="overflow-x-auto">
+                        <table id="matrixTable" class="table table-zebra w-full">
+                            <thead class="bg-gray-700/50"></thead>
+                            <tbody id="matrixBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Stacked Charts Column -->
+            <div class="flex flex-col gap-6">
+                <!-- Factor Importance Chart -->
+                <div class="card glass shadow-xl flex-1">
+                    <div class="card-body">
+                        <h2 class="card-title text-white mb-2">Factor Importance</h2>
+                        <div id="weightsChart" style="height: 180px;"></div>
+                    </div>
+                </div>
+                <!-- Score Details Chart -->
+                <div class="card glass shadow-xl flex-1">
+                    <div class="card-body">
+                        <h2 class="card-title text-white mb-2">Score Details</h2>
+                        <div id="breakdownChart" style="height: 180px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Final Results Chart (Spanning 2 Columns) -->
+            <div class="card glass shadow-xl border-2 border-green-500 lg:col-span-2">
+                <div class="card-body">
+                    <h2 id="winnerTitle" class="card-title text-white text-xl mb-4 flex items-center justify-center">
+                        🏆 FINAL RESULTS - Winner 🎉
+                    </h2>
+                    <div id="rankingChart" style="height: 400px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-8 pb-4">
+            <p class="text-xs text-gray-500">Handmade in 🇯🇪 by Chas, powered by tea and a slightly overconfident robot.</p>
+        </div>
+    </div>
+
+    <!-- New Decision Modal -->
+    <dialog id="new_decision_modal" class="modal">
+        <div class="modal-box glass">
+            <h3 class="font-bold text-lg">Create a New Decision</h3>
+            <div class="py-4">
+                <input id="newDecisionName" type="text" placeholder="Enter name for new decision matrix" class="input input-bordered w-full" />
+            </div>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn">Cancel</button>
+                    <button id="createDecisionBtn" type="button" class="btn btn-primary">Create</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Delete Confirmation Modal -->
+    <dialog id="delete_confirmation_modal" class="modal">
+        <div class="modal-box glass">
+            <h3 class="font-bold text-lg">Delete Decision Matrix</h3>
+            <p class="py-4">Are you sure you want to delete "<span id="deleteMatrixName"></span>"?</p>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn">Cancel</button>
+                    <button id="confirmDeleteBtn" type="button" class="btn btn-error">Delete</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
+
+    <script>
+        let rankingChart, weightsChart, breakdownChart;
+        let matrices = {};
+        let currentMatrixId = 'default';
+
+        // Initialize charts
+        function initCharts() {
+            // Ranking Chart
+            rankingChart = echarts.init(document.getElementById('rankingChart'), 'dark');
+            
+            // Weights Chart
+            weightsChart = echarts.init(document.getElementById('weightsChart'), 'dark');
+            
+            // Breakdown Chart
+            breakdownChart = echarts.init(document.getElementById('breakdownChart'), 'dark');
+            
+            updateCharts();
+        }
+
+        // Load matrices from localStorage
+        function loadMatrices() {
+            const saved = localStorage.getItem('decisionMatrices');
+            if (saved) {
+                matrices = JSON.parse(saved);
+            } else {
+                // Create default matrix with example data
+                matrices = {
+                    'default': {
+                        id: 'default',
+                        name: 'Choose the Best Milk',
+                        data: {
+                            options: ['Jersey Milk', 'Austrian Milk', 'London Milk'],
+                            criteria: [
+                                { name: 'Taste', weight: 5 },
+                                { name: '% Fat', weight: 3 },
+                                { name: 'Protein', weight: 4 }
+                            ],
+                            scores: [
+                                [5, 4, 3],
+                                [5, 2, 1],
+                                [5, 1, 1]
+                            ]
+                        }
+                    }
+                };
+            }
+            updateTabs();
+        }
+
+        // Save matrices to localStorage
+        function saveMatrices() {
+            // Save current matrix data
+            matrices[currentMatrixId].data = getCurrentMatrixData();
+            localStorage.setItem('decisionMatrices', JSON.stringify(matrices));
+        }
+
+        // Get current matrix data from DOM
+        function getCurrentMatrixData() {
+            const table = document.getElementById('matrixTable');
+            const headerInputs = table.querySelectorAll('thead th input');
+            const rows = table.querySelectorAll('tbody tr:not(:last-child)');
+            
+            const options = [];
+            headerInputs.forEach(input => {
+                options.push(input.value || input.placeholder);
+            });
+            
+            const criteria = [];
+            const scores = [];
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td input');
+                const criterionName = cells[0].value || cells[0].placeholder;
+                const weight = parseFloat(cells[1].value) || 1;
+                
+                criteria.push({ name: criterionName, weight });
+                
+                const rowScores = [];
+                for (let i = 2; i < cells.length; i++) {
+                    rowScores.push(parseFloat(cells[i].value) || 0);
+                }
+                scores.push(rowScores);
+            });
+            
+            return { options, criteria, scores };
+        }
+
+        // Load matrix data into DOM
+        function loadMatrixData(matrixData) {
+            const table = document.getElementById('matrixTable');
+            const thead = table.querySelector('thead');
+            const tbody = table.querySelector('tbody');
+
+            // Clear existing table content
+            thead.innerHTML = '';
+            tbody.innerHTML = '';
+
+            // --- Build Header Row 1 (Helper Texts) ---
+            const headerRow1 = document.createElement('tr');
+            headerRow1.className = 'border-b-0'; // Invisible border
+            
+            headerRow1.innerHTML = `
+                <th class="p-1 pb-2 text-left text-xs text-gray-400 font-normal">(What matters to you?)</th>
+                <th class="p-1 pb-2 text-center text-xs text-gray-400 font-normal">(1=not, 5=very important)</th>
+                <th class="p-1 pb-2 text-center text-xs text-gray-400 font-normal" colspan="${matrixData.options.length}">(1 = poor, 5 = excellent)</th>
+                <th class="w-8"></th>
+            `;
+            thead.appendChild(headerRow1);
+
+            // --- Build Header Row 2 (Titles and Inputs) ---
+            const headerRow2 = document.createElement('tr');
+
+            // Factors and Importance Titles
+            headerRow2.innerHTML = `
+                <th class="pt-0 text-left text-white font-bold text-base">Factors</th>
+                <th class="pt-0 text-center text-white font-bold text-base">Importance</th>
+            `;
+
+            // Option Inputs
+            matrixData.options.forEach((option, index) => {
+                const th = document.createElement('th');
+                th.className = 'p-2 pt-0 text-center relative group';
+                th.innerHTML = `
+                    <input type="text" class="matrix-input w-32 p-2 rounded text-center font-bold"
+                           value="${option}" onchange="updateOptionName(${index}, this.value)" placeholder="Option ${index + 1}">
+                    <button class="absolute top-1 right-2 text-red-500 hover:text-red-300 opacity-0 group-hover:opacity-100 text-xl" onclick="removeColumn(${index})" title="Remove this option">×</button>
+                `;
+                headerRow2.appendChild(th);
+            });
+
+            // Add Column Button
+            const addTh = document.createElement('th');
+            addTh.className = 'p-2 pt-0 text-center';
+            addTh.innerHTML = `<button class="text-green-400 hover:text-green-300 text-2xl" onclick="addColumn()" title="Add another option">+</button>`;
+            headerRow2.appendChild(addTh);
+
+            thead.appendChild(headerRow2);
+
+            // --- Build Body ---
+            matrixData.criteria.forEach((criterion, rowIndex) => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-gray-700';
+
+                let html = `
+                    <td class="p-2">
+                        <input type="text" class="matrix-input w-full p-2 rounded"
+                               value="${criterion.name}" placeholder="Factor ${rowIndex + 1}" onchange="saveMatrices()">
+                    </td>
+                    <td class="p-2 text-center">
+                        <input type="number" class="matrix-input w-20 p-2 rounded text-center"
+                               value="${criterion.weight}" min="1" max="10" step="1" onchange="updateCharts(); saveMatrices();">
+                    </td>
+                `;
+
+                matrixData.scores[rowIndex].forEach((score, colIndex) => {
+                    html += `
+                        <td class="p-2 text-center">
+                            <input type="number" class="matrix-input w-20 p-2 rounded text-center"
+                                   value="${score}" min="1" max="10" step="1" onchange="updateCharts(); saveMatrices();">
+                        </td>
+                    `;
+                });
+
+                html += `
+                    <td class="p-2 text-center">
+                        <button class="text-red-500 hover:text-red-300 text-xl" onclick="removeRow(this)" title="Remove this factor">×</button>
+                    </td>
+                `;
+
+                tr.innerHTML = html;
+                tbody.appendChild(tr);
+            });
+
+            // --- Add New Row Template ---
+            const newRowTr = document.createElement('tr');
+            newRowTr.className = 'bg-gray-800';
+            let newRowHtml = `
+                <td class="p-2">
+                    <input type="text" class="matrix-input w-full p-2 rounded bg-gray-700"
+                           placeholder="+ Add another factor" onfocus="addRow()">
+                </td>
+                <td class="p-2 text-center"></td>
+            `;
+
+            matrixData.options.forEach(() => {
+                newRowHtml += `<td class="p-2 text-center"></td>`;
+            });
+
+            newRowHtml += `<td class="p-2 text-center"></td>`;
+            newRowTr.innerHTML = newRowHtml;
+            tbody.appendChild(newRowTr);
+        }
+
+        function updateOptionName(optionIndex, newName) {
+            matrices[currentMatrixId].data.options[optionIndex] = newName;
+            saveMatrices();
+            updateCharts();
+        }
+
+        // Update tabs with editable names
+        function updateTabs() {
+            const tabsContainer = document.getElementById('matrixTabs');
+            tabsContainer.innerHTML = '';
+            
+            Object.values(matrices).forEach(matrix => {
+                const tab = document.createElement('div');
+                tab.className = `tab ${matrix.id === currentMatrixId ? 'tab-active' : ''} relative`;
+                tab.setAttribute('data-matrix-id', matrix.id);
+                
+                // Create editable input for tab name
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.value = matrix.name;
+                input.className = 'bg-transparent border-none outline-none text-center min-w-0 max-w-48';
+                input.placeholder = 'Decision Name';
+                
+                // Handle tab switching and name editing
+                input.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (matrix.id !== currentMatrixId) {
+                        switchMatrix(matrix.id);
+                    }
+                });
+                
+                input.addEventListener('change', () => {
+                    matrices[matrix.id].name = input.value || 'Untitled Decision';
+                    saveMatrices();
+                });
+                
+                input.addEventListener('blur', () => {
+                    if (!input.value.trim()) {
+                        input.value = 'Untitled Decision';
+                        matrices[matrix.id].name = 'Untitled Decision';
+                        saveMatrices();
+                    }
+                });
+                
+                tab.appendChild(input);
+                tabsContainer.appendChild(tab);
+            });
+            
+            const newButton = document.createElement('button');
+            newButton.id = 'newDecisionBtn';
+            newButton.className = 'btn btn-sm btn-ghost text-green-400';
+            newButton.textContent = '+ New Decision';
+            tabsContainer.appendChild(newButton);
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'btn btn-sm btn-ghost text-red-500 hover:text-red-300';
+            deleteButton.innerHTML = '🗑️';
+            deleteButton.onclick = removeCurrentMatrix;
+            tabsContainer.appendChild(deleteButton);
+        }
+
+        // Switch matrix
+        function switchMatrix(matrixId) {
+            currentMatrixId = matrixId;
+            const matrix = matrices[matrixId];
+            
+            loadMatrixData(matrix.data);
+            updateTabs();
+            updateCharts();
+        }
+
+        // Create new matrix from modal
+        function createNewMatrix() {
+            const name = document.getElementById('newDecisionName').value || 'New Decision';
+            
+            const id = 'matrix_' + Date.now();
+            matrices[id] = {
+                id: id,
+                name: name,
+                data: {
+                    options: ['Option 1', 'Option 2', 'Option 3'],
+                    criteria: [
+                        { name: 'Factor 1', weight: 5 },
+                        { name: 'Factor 2', weight: 5 },
+                        { name: 'Factor 3', weight: 5 }
+                    ],
+                    scores: [
+                        [5, 5, 5],
+                        [5, 5, 5],
+                        [5, 5, 5]
+                    ]
+                }
+            };
+            
+            document.getElementById('newDecisionName').value = '';
+            document.getElementById('new_decision_modal').close();
+            switchMatrix(id);
+            saveMatrices();
+        }
+
+        // Remove current matrix
+        function removeCurrentMatrix() {
+            if (Object.keys(matrices).length <= 1) {
+                showAlert("You can't delete the last decision matrix.");
+                return;
+            }
+            
+            document.getElementById('deleteMatrixName').textContent = matrices[currentMatrixId].name;
+            document.getElementById('delete_confirmation_modal').showModal();
+        }
+
+        // Confirm delete matrix
+        function confirmDeleteMatrix() {
+            delete matrices[currentMatrixId];
+            currentMatrixId = Object.keys(matrices)[0];
+            switchMatrix(currentMatrixId);
+            saveMatrices();
+            document.getElementById('delete_confirmation_modal').close();
+        }
+
+        // Show alert using DaisyUI toast (fallback to alert if needed)
+        function showAlert(message) {
+            alert(message); // Simple fallback for now
+        }
+
+        // Update all charts with current data
+        function updateCharts() {
+            const data = getMatrixData();
+            updateRankingChart(data);
+            updateWeightsChart(data);
+            updateBreakdownChart(data);
+        }
+
+        // Extract data from matrix table
+        function getMatrixData() {
+            const table = document.getElementById('matrixTable');
+            const rows = table.querySelectorAll('tbody tr:not(:last-child)');
+            const headerInputs = table.querySelectorAll('thead tr:nth-child(2) th input[type="text"]');
+            
+            const criteria = [];
+            const options = [];
+            
+            // Get option names from header inputs
+            headerInputs.forEach((input, index) => {
+                options.push(input.value || `Option ${index + 1}`);
+            });
+
+            // Initialize scores as an array of arrays (one for each option column)
+            const scores = Array(options.length).fill(0).map(() => []);
+            
+            // Get criteria and scores
+            rows.forEach((row, rowIndex) => {
+                const cells = row.querySelectorAll('td input');
+                const criterionName = cells[0].value || `Factor ${rowIndex + 1}`;
+                const weight = parseFloat(cells[1].value) || 1;
+                
+                criteria.push({ name: criterionName, weight });
+                
+                // Loop through score cells and push to the correct option's score array
+                for (let i = 2; i < cells.length; i++) {
+                    const score = parseFloat(cells[i].value) || 0;
+                    const optionIndex = i - 2;
+                    if (scores[optionIndex] !== undefined) {
+                        scores[optionIndex].push(score);
+                    }
+                }
+            });
+            
+            return { criteria, options, scores };
+        }
+
+        // Update ranking chart
+        function updateRankingChart(data) {
+            const results = [];
+            
+            data.options.forEach((option, optionIndex) => {
+                let weightedScore = 0;
+                data.criteria.forEach((criterion, criterionIndex) => {
+                    const score = data.scores[optionIndex] ? data.scores[optionIndex][criterionIndex] || 0 : 0;
+                    weightedScore += score * criterion.weight;
+                });
+                results.push({ name: option, score: weightedScore });
+            });
+            
+            results.sort((a, b) => b.score - a.score);
+
+            let winnerText;
+            if (results.length > 1 && results[0].score === results[1].score && results[0].score > 0) {
+                winnerText = "It's a Tie! 🎉";
+            } else if (results.length > 0) {
+                winnerText = `Winner: ${results[0].name} 🎉`;
+            } else {
+                winnerText = 'No results yet';
+            }
+            document.getElementById('winnerTitle').innerHTML = `🏆 FINAL RESULTS - ${winnerText}`;
+            
+            const option = {
+                title: { text: '', textStyle: { color: '#fff' } },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        const winner = params[0].dataIndex === 0 ? ' 🏆 WINNER!' : '';
+                        return `${params[0].name}: ${params[0].value.toFixed(1)}${winner}`;
+                    }
+                },
+                xAxis: {
+                    type: 'category',
+                    data: results.map(r => r.name),
+                    axisLabel: {
+                        color: '#ccc',
+                        fontSize: 14,
+                        fontWeight: 'bold'
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: '#ccc' }
+                },
+                series: [{
+                    data: results.map((r, index) => ({
+                        value: r.score,
+                        itemStyle: {
+                            color: index === 0 ? '#10B981' : (index === 1 ? '#3B82F6' : '#F59E0B')
+                        }
+                    })),
+                    type: 'bar',
+                    barWidth: '60%',
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#fff',
+                        fontSize: 16,
+                        fontWeight: 'bold',
+                        formatter: function(params) {
+                            return params.dataIndex === 0 ? '🏆 ' + params.value.toFixed(1) : params.value.toFixed(1);
+                        }
+                    }
+                }]
+            };
+            
+            rankingChart.setOption(option);
+        }
+
+        // Update weights chart
+        function updateWeightsChart(data) {
+            const option = {
+                title: { text: '', textStyle: { color: '#fff' } },
+                tooltip: { trigger: 'item' },
+                series: [{
+                    type: 'pie',
+                    radius: '70%',
+                    data: data.criteria.map(c => ({ name: c.name, value: c.weight })),
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 10,
+                            shadowOffsetX: 0,
+                            shadowColor: 'rgba(0, 0, 0, 0.5)'
+                        }
+                    }
+                }]
+            };
+            
+            weightsChart.setOption(option);
+        }
+
+        // Update breakdown chart
+        function updateBreakdownChart(data) {
+            const series = [];
+            const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
+            
+            data.options.forEach((option, optionIndex) => {
+                const scores = data.criteria.map((criterion, criterionIndex) => {
+                    const score = data.scores[optionIndex] ? data.scores[optionIndex][criterionIndex] || 0 : 0;
+                    return score * criterion.weight;
+                });
+                
+                series.push({
+                    name: option,
+                    type: 'bar',
+                    stack: 'total',
+                    data: scores,
+                    itemStyle: { color: colors[optionIndex % colors.length] }
+                });
+            });
+            
+            const option = {
+                title: { text: '', textStyle: { color: '#fff' } },
+                tooltip: { trigger: 'axis' },
+                legend: {
+                    data: data.options,
+                    textStyle: { color: '#ccc' }
+                },
+                xAxis: {
+                    type: 'category',
+                    data: data.criteria.map(c => c.name),
+                    axisLabel: { color: '#ccc' }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: '#ccc' }
+                },
+                series: series
+            };
+            
+            breakdownChart.setOption(option);
+        }
+
+        // Add new row
+        function addRow() {
+            const matrixData = getCurrentMatrixData();
+            const tbody = document.getElementById('matrixBody');
+            const placeholderRow = tbody.lastElementChild;
+
+            const newTr = document.createElement('tr');
+            newTr.className = 'border-b border-gray-700';
+
+            let newRowHtml = `
+                <td class="p-2">
+                    <input type="text" class="matrix-input w-full p-2 rounded"
+                           placeholder="New Factor" onchange="saveMatrices()">
+                </td>
+                <td class="p-2 text-center">
+                    <input type="number" class="matrix-input w-20 p-2 rounded text-center"
+                           value="5" min="1" max="10" step="1" onchange="updateCharts(); saveMatrices();">
+                </td>
+            `;
+
+            matrixData.options.forEach(() => {
+                newRowHtml += `
+                    <td class="p-2 text-center">
+                        <input type="number" class="matrix-input w-20 p-2 rounded text-center"
+                               value="5" min="1" max="10" step="1" onchange="updateCharts(); saveMatrices();">
+                    </td>
+                `;
+            });
+
+            newRowHtml += `
+                <td class="p-2 text-center">
+                    <button class="text-red-500 hover:text-red-300 text-xl" onclick="removeRow(this)" title="Remove this factor">×</button>
+                </td>
+            `;
+
+            newTr.innerHTML = newRowHtml;
+            tbody.insertBefore(newTr, placeholderRow);
+
+            // Focus on the new factor input
+            newTr.querySelector('input').focus();
+
+            updateCharts();
+            saveMatrices();
+        }
+
+        // Remove row
+        function removeRow(button) {
+            const row = button.closest('tr');
+            row.remove();
+            updateCharts();
+            saveMatrices();
+        }
+
+        // Add new column
+        function addColumn() {
+            const matrixData = getCurrentMatrixData();
+            matrixData.options.push(`Option ${matrixData.options.length + 1}`);
+            matrixData.scores.forEach(row => row.push(0));
+            loadMatrixData(matrixData);
+            updateCharts();
+            saveMatrices();
+        }
+
+
+        // Remove column
+        function removeColumn(index) {
+            const matrixData = getCurrentMatrixData();
+            matrixData.options.splice(index, 1);
+            matrixData.scores.forEach(row => row.splice(index, 1));
+            loadMatrixData(matrixData);
+            updateCharts();
+            saveMatrices();
+        }
+
+        // Initialize on page load
+        // Custom keyboard navigation for the matrix table
+        function handleTableNavigation(event) {
+            if (event.key !== 'Tab' || !event.target.closest('#matrixTable')) {
+                return;
+            }
+
+            const currentInput = event.target;
+            const currentCell = currentInput.closest('td');
+            if (!currentCell) return;
+
+            const currentRow = currentCell.closest('tr');
+            const rowCells = Array.from(currentRow.children);
+            const cellIndex = rowCells.indexOf(currentCell);
+
+            let nextRow;
+            if (event.shiftKey) { // Move up
+                nextRow = currentRow.previousElementSibling;
+            } else { // Move down
+                nextRow = currentRow.nextElementSibling;
+                // Skip the last "add new" row
+                if (nextRow && !nextRow.nextElementSibling) {
+                    nextRow = null;
+                }
+            }
+
+            if (nextRow) {
+                event.preventDefault();
+                const nextCell = nextRow.children[cellIndex];
+                if (nextCell) {
+                    const nextInput = nextCell.querySelector('input');
+                    if (nextInput) {
+                        nextInput.focus();
+                        nextInput.select();
+                    }
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMatrices();
+            // Load the initial matrix data into the DOM before initializing charts
+            if (matrices[currentMatrixId]) {
+                loadMatrixData(matrices[currentMatrixId].data);
+            }
+            initCharts();
+
+            // Modal event handlers
+            document.getElementById('createDecisionBtn').addEventListener('click', createNewMatrix);
+            document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDeleteMatrix);
+            
+            // Event delegation for dynamically added buttons
+            document.addEventListener('click', function(e) {
+                // Handle new decision button
+                if (e.target && e.target.id === 'newDecisionBtn') {
+                    document.getElementById('new_decision_modal').showModal();
+                }
+                
+                // Handle delete matrix button (trash icon)
+                if (e.target && e.target.innerHTML === '🗑️') {
+                    removeCurrentMatrix();
+                }
+            });
+
+            // Add keyboard navigation listener
+            document.addEventListener('keydown', handleTableNavigation);
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                if (rankingChart) rankingChart.resize();
+                if (weightsChart) weightsChart.resize();
+                if (breakdownChart) breakdownChart.resize();
+            });
+        });
+    </script>
+</body>
+</html>
