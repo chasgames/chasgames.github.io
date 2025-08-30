@@ -1,2 +1,2 @@
 # chasgames.github.io
-Decision Matrix
+[Decision Matrix](https://chasgames.github.io/decision-matrix-chas.html)
